@@ -1,0 +1,3 @@
+CHANNEL_LIST_FILE = '/channels.json'
+CHANNELS_DIRECTORY = '/channels'
+CHANNEL_HISTORY_FILE = CHANNELS_DIRECTORY + '/{0}.json'
