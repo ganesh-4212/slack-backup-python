@@ -1,26 +1,19 @@
 import os
-import argparse
+import click
 import json
 import requests
 import web_constants as WEB_CONSTANTS
 import app_constants as APP_CONSTANTS
 
-parser = argparse.ArgumentParser(
-    description='Backup Slack channel, conversation, Users, and direct messages.')
 
-parser.add_argument('-t', '--token', dest='token',required=True,
-                    help='Slack api Access token')
-
-parser.add_argument('-od', '--outDir', dest='outDir',required=False,default='./output',
-                    help='Output directory to store JSON backup files.')
-
-args = parser.parse_args()
-
-token = args.token
-outDir = args.outDir
+@click.command()
+@click.option('--out', default='./output')
+@click.argument('token', type=click.types.STRING)
+def cli(out, token):
+    run(token, out)
 
 
-def getOutputPath(relativePath):
+def getOutputPath(relativePath, outDir):
     return outDir+relativePath
 
 
@@ -40,8 +33,8 @@ def readRequestJsonFile():
         return jsonObj
 
 
-def writeJSONFile(jsonObj, filePath):
-    outputPath = getOutputPath(filePath)
+def writeJSONFile(jsonObj, filePath, outDir):
+    outputPath = getOutputPath(filePath, outDir)
     dirPath = os.path.dirname(outputPath)
     if not os.path.exists(dirPath):
         os.makedirs(dirPath)
@@ -50,93 +43,89 @@ def writeJSONFile(jsonObj, filePath):
         json.dump(jsonObj, file, indent=True)
 
 
-def getChannels():
+def getChannels(token):
     response = requests.get(WEB_CONSTANTS.CHANNEL_LIST,
                             params={'token': token})
     return response.json()['channels']
 
 
-def getChannelHistory(channelId):
+def getChannelHistory(channelId, token):
     response = requests.get(WEB_CONSTANTS.CHANNEL_HISTORY, params={
                             'token': token, 'channel': channelId})
     return response.json()
 
 
-def getGroups():
+def getGroups(token):
     response = requests.get(WEB_CONSTANTS.GROUP_LIST, params={'token': token})
     return response.json()['groups']
 
 
-def getGroupHistory(groupId):
+def getGroupHistory(groupId, token):
     response = requests.get(WEB_CONSTANTS.GROUP_HISTORY, params={
                             'token': token, 'channel': groupId})
     return response.json()
 
 
-def getOneToOneConversations():
+def getOneToOneConversations(token):
     # im for one to one conv.
     response = requests.get(WEB_CONSTANTS.CONVERSATION_LIST, params={
                             'token': token, 'types': 'im'})
     return response.json()['channels']
 
 
-def getUsers():
+def getUsers(token):
     # im for one to one conv.
     response = requests.get(WEB_CONSTANTS.USERS_LIST, params={'token': token})
     return response.json()['members']
 
 
-def getConversationHistory(conversationId):
+def getConversationHistory(conversationId, token):
     response = requests.get(WEB_CONSTANTS.CONVERSATION_HISTORY, params={
                             'token': token, 'channel': conversationId})
     return response.json()
 
 
-def run():
-    channels = getChannels()
-    writeJSONFile(channels, APP_CONSTANTS.CHANNEL_LIST_FILE)
+def run(token, outDir):
+    channels = getChannels(token)
+    writeJSONFile(channels, APP_CONSTANTS.CHANNEL_LIST_FILE, outDir)
 
     for channel in channels:
         channelId = channel['id']
         channelName = channel['name']
-        channelHistory = getChannelHistory(channelId)
+        channelHistory = getChannelHistory(channelId, token)
         channelHistoryFilename = parseTemplatedFileName(
             APP_CONSTANTS.CHANNEL_HISTORY_FILE, channelName)
-        writeJSONFile(channelHistory, channelHistoryFilename)
+        writeJSONFile(channelHistory, channelHistoryFilename, outDir)
 
-    groups = getGroups()
-    writeJSONFile(groups, APP_CONSTANTS.GROUP_LIST_FILE)
+    groups = getGroups(token)
+    writeJSONFile(groups, APP_CONSTANTS.GROUP_LIST_FILE, outDir)
 
     for group in groups:
         groupId = group['id']
         groupName = group['name']
 
-        groupHistory = getGroupHistory(groupId)
+        groupHistory = getGroupHistory(groupId, token)
 
         groupHistoryFilename = parseTemplatedFileName(
             APP_CONSTANTS.GROUP_HISTORY_FILE, groupName)
-        writeJSONFile(groupHistory, groupHistoryFilename)
+        writeJSONFile(groupHistory, groupHistoryFilename, outDir)
 
-    users = getUsers()
-    writeJSONFile(users, APP_CONSTANTS.USER_LIST_FILE)
+    users = getUsers(token)
+    writeJSONFile(users, APP_CONSTANTS.USER_LIST_FILE, outDir)
 
     userIdToNameDict = {user['id']: user['name'] for user in users}
 
     # Getting one to one conversation list
-    oneToOneConversations = getOneToOneConversations()
+    oneToOneConversations = getOneToOneConversations(token)
     writeJSONFile(oneToOneConversations,
-                  APP_CONSTANTS.ONE_TO_ONE_CONVERSATION_LIST_FILE)
+                  APP_CONSTANTS.ONE_TO_ONE_CONVERSATION_LIST_FILE, outDir)
 
     for conversation in oneToOneConversations:
         conversationId = conversation['id']
         userId = conversation['user']
         userName = userIdToNameDict[userId]
 
-        conversationHistory = getConversationHistory(conversationId)
+        conversationHistory = getConversationHistory(conversationId, token)
         conversationHistoryFilename = parseTemplatedFileName(
             APP_CONSTANTS.ONE_TO_ONE_CONVERSATION_HISTORY_FILE, userName, userId)
-        writeJSONFile(conversationHistory, conversationHistoryFilename)
-
-
-if __name__ == '__main__':
-    run()
+        writeJSONFile(conversationHistory, conversationHistoryFilename, outDir)
