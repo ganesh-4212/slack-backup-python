@@ -66,9 +66,18 @@ def getChannels():
 
 
 def getChannelHistory(channelId):
-    response = requests.get(WEB_CONSTANTS.CHANNEL_HISTORY, params={
-                            'channel': channelId}, headers=auth_headers, cookies=auth_cookies)
-    return response.json()
+    params = { 'channel': channelId, 'count': 1000}
+    msgs = []
+    while True:
+        response = requests.get(WEB_CONSTANTS.CHANNEL_HISTORY, params=params,
+                                headers=auth_headers, cookies=auth_cookies)
+        rsp = response.json()
+        msgs.extend(rsp['messages'])
+        if not rsp['has_more']:
+            break
+
+        params['latest'] = msgs[-1]['ts']
+    return msgs
 
 
 def getGroups():
@@ -77,10 +86,18 @@ def getGroups():
 
 
 def getGroupHistory(groupId):
-    response = requests.get(WEB_CONSTANTS.GROUP_HISTORY, params={
-                            'channel': groupId}, headers=auth_headers, cookies=auth_cookies)
-    return response.json()
+    params = { 'channel': groupId, 'count': 1000}
+    msgs = []
+    while True:
+        response = requests.get(WEB_CONSTANTS.GROUP_HISTORY, params=params,
+                                headers=auth_headers, cookies=auth_cookies)
+        rsp = response.json()
+        msgs.extend(rsp['messages'])
+        if not rsp['has_more']:
+            break
 
+        params['latest'] = msgs[-1]['ts']
+    return msgs
 
 def getOneToOneConversations():
     # im for one to one conv.
@@ -96,9 +113,18 @@ def getUsers():
 
 
 def getConversationHistory(conversationId):
-    response = requests.get(WEB_CONSTANTS.CONVERSATION_HISTORY, params={
-                            'channel': conversationId}, headers=auth_headers, cookies=auth_cookies)
-    return response.json()
+    params = { 'channel': conversationId, 'limit': 1000}
+    msgs = []
+    while True:
+        response = requests.get(WEB_CONSTANTS.CONVERSATION_HISTORY, params=params,
+                                headers=auth_headers, cookies=auth_cookies)
+        rsp = response.json()
+        msgs.extend(rsp['messages'])
+        if not rsp['has_more']:
+            break
+
+        params['cursor'] = rsp['response_metadata']['next_cursor']
+    return msgs
 
 
 def run():
