@@ -11,12 +11,20 @@ parser = argparse.ArgumentParser(
 parser.add_argument('-t', '--token', dest='token',required=True,
                     help='Slack api Access token')
 
+parser.add_argument('-c', '--cookie', dest='cookie',required=False,
+                    help='Slack user cookie')
+
 parser.add_argument('-od', '--outDir', dest='outDir',required=False,default='./output',
                     help='Output directory to store JSON backup files.')
 
 args = parser.parse_args()
 
 token = args.token
+auth_headers = {'Authorization': 'Bearer ' + token}
+if args.cookie:
+    auth_cookies = {'d': args.cookie}
+else:
+    auth_cookies = {}
 outDir = args.outDir
 
 
@@ -52,43 +60,44 @@ def writeJSONFile(jsonObj, filePath):
 
 def getChannels():
     response = requests.get(WEB_CONSTANTS.CHANNEL_LIST,
-                            params={'token': token})
+                            headers=auth_headers, cookies=auth_cookies)
+    print(response.json());
     return response.json()['channels']
 
 
 def getChannelHistory(channelId):
     response = requests.get(WEB_CONSTANTS.CHANNEL_HISTORY, params={
-                            'token': token, 'channel': channelId})
+                            'channel': channelId}, headers=auth_headers, cookies=auth_cookies)
     return response.json()
 
 
 def getGroups():
-    response = requests.get(WEB_CONSTANTS.GROUP_LIST, params={'token': token})
+    response = requests.get(WEB_CONSTANTS.GROUP_LIST, headers=auth_headers, cookies=auth_cookies)
     return response.json()['groups']
 
 
 def getGroupHistory(groupId):
     response = requests.get(WEB_CONSTANTS.GROUP_HISTORY, params={
-                            'token': token, 'channel': groupId})
+                            'channel': groupId}, headers=auth_headers, cookies=auth_cookies)
     return response.json()
 
 
 def getOneToOneConversations():
     # im for one to one conv.
     response = requests.get(WEB_CONSTANTS.CONVERSATION_LIST, params={
-                            'token': token, 'types': 'im'})
+                            'types': 'im'}, headers=auth_headers, cookies=auth_cookies)
     return response.json()['channels']
 
 
 def getUsers():
     # im for one to one conv.
-    response = requests.get(WEB_CONSTANTS.USERS_LIST, params={'token': token})
+    response = requests.get(WEB_CONSTANTS.USERS_LIST, headers=auth_headers, cookies=auth_cookies)
     return response.json()['members']
 
 
 def getConversationHistory(conversationId):
     response = requests.get(WEB_CONSTANTS.CONVERSATION_HISTORY, params={
-                            'token': token, 'channel': conversationId})
+                            'channel': conversationId}, headers=auth_headers, cookies=auth_cookies)
     return response.json()
 
 
