@@ -2,17 +2,15 @@ import os
 import argparse
 import json
 import requests
-import web_constants as WEB_CONSTANTS
 import app_constants as APP_CONSTANTS
+from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
 
 parser = argparse.ArgumentParser(
     description='Backup Slack channel, conversation, Users, and direct messages.')
 
 parser.add_argument('-t', '--token', dest='token',required=True,
                     help='Slack api Access token')
-
-parser.add_argument('-c', '--cookie', dest='cookie',required=False,
-                    help='Slack user cookie')
 
 parser.add_argument('-od', '--outDir', dest='outDir',required=False,default='./output',
                     help='Output directory to store JSON backup files.')
@@ -21,12 +19,9 @@ args = parser.parse_args()
 
 token = args.token
 auth_headers = {'Authorization': 'Bearer ' + token}
-if args.cookie:
-    auth_cookies = {'d': args.cookie}
-else:
-    auth_cookies = {}
 outDir = args.outDir
 
+client = WebClient(token=token)
 
 def getOutputPath(relativePath):
     return outDir+relativePath
@@ -57,73 +52,32 @@ def writeJSONFile(jsonObj, filePath):
     with open(outputPath, 'w+') as file:
         json.dump(jsonObj, file, indent=True)
 
+def getUsers():
+    response = client.users_list()
+    return response['members']
 
 def getChannels():
-    response = requests.get(WEB_CONSTANTS.CHANNEL_LIST,
-                            headers=auth_headers, cookies=auth_cookies)
-    print(response.json());
-    return response.json()['channels']
+    response = client.conversations_list(types='public_channel,private_channel')
+    return response['channels']
 
+def getGroups():
+    response = client.conversations_list(types='mpim')
+    return response['channels']
 
-def getChannelHistory(channelId):
+def getOneToOneConversations():
+    response = client.conversations_list(types='im')
+    return response['channels']
+
+def getConversationHistory(channelId):
     params = { 'channel': channelId, 'count': 1000}
     msgs = []
     while True:
-        response = requests.get(WEB_CONSTANTS.CHANNEL_HISTORY, params=params,
-                                headers=auth_headers, cookies=auth_cookies)
-        rsp = response.json()
-        msgs.extend(rsp['messages'])
-        if not rsp['has_more']:
+        response = client.conversations_history(**params)
+        msgs.extend(response['messages'])
+        if not response['has_more']:
             break
 
         params['latest'] = msgs[-1]['ts']
-    return msgs
-
-
-def getGroups():
-    response = requests.get(WEB_CONSTANTS.GROUP_LIST, headers=auth_headers, cookies=auth_cookies)
-    return response.json()['groups']
-
-
-def getGroupHistory(groupId):
-    params = { 'channel': groupId, 'count': 1000}
-    msgs = []
-    while True:
-        response = requests.get(WEB_CONSTANTS.GROUP_HISTORY, params=params,
-                                headers=auth_headers, cookies=auth_cookies)
-        rsp = response.json()
-        msgs.extend(rsp['messages'])
-        if not rsp['has_more']:
-            break
-
-        params['latest'] = msgs[-1]['ts']
-    return msgs
-
-def getOneToOneConversations():
-    # im for one to one conv.
-    response = requests.get(WEB_CONSTANTS.CONVERSATION_LIST, params={
-                            'types': 'im'}, headers=auth_headers, cookies=auth_cookies)
-    return response.json()['channels']
-
-
-def getUsers():
-    # im for one to one conv.
-    response = requests.get(WEB_CONSTANTS.USERS_LIST, headers=auth_headers, cookies=auth_cookies)
-    return response.json()['members']
-
-
-def getConversationHistory(conversationId):
-    params = { 'channel': conversationId, 'limit': 1000}
-    msgs = []
-    while True:
-        response = requests.get(WEB_CONSTANTS.CONVERSATION_HISTORY, params=params,
-                                headers=auth_headers, cookies=auth_cookies)
-        rsp = response.json()
-        msgs.extend(rsp['messages'])
-        if not rsp['has_more']:
-            break
-
-        params['cursor'] = rsp['response_metadata']['next_cursor']
     return msgs
 
 
@@ -134,9 +88,12 @@ def run():
     for channel in channels:
         channelId = channel['id']
         channelName = channel['name']
-        channelHistory = getChannelHistory(channelId)
-        channelHistoryFilename = parseTemplatedFileName(
-            APP_CONSTANTS.CHANNEL_HISTORY_FILE, channelName)
+        channelHistory = getConversationHistory(channelId)
+        if channel['is_private']:
+            template = APP_CONSTANTS.PRIVATE_CHANNEL_HISTORY_FILE
+        else:
+            template = APP_CONSTANTS.CHANNEL_HISTORY_FILE
+        channelHistoryFilename = parseTemplatedFileName(template, channelName)
         writeJSONFile(channelHistory, channelHistoryFilename)
 
     groups = getGroups()
@@ -146,7 +103,7 @@ def run():
         groupId = group['id']
         groupName = group['name']
 
-        groupHistory = getGroupHistory(groupId)
+        groupHistory = getConversationHistory(groupId)
 
         groupHistoryFilename = parseTemplatedFileName(
             APP_CONSTANTS.GROUP_HISTORY_FILE, groupName)
@@ -157,7 +114,7 @@ def run():
 
     userIdToNameDict = {user['id']: user['name'] for user in users}
 
-    # Getting one to one conversation list
+    # Get one to one conversation list
     oneToOneConversations = getOneToOneConversations()
     writeJSONFile(oneToOneConversations,
                   APP_CONSTANTS.ONE_TO_ONE_CONVERSATION_LIST_FILE)
@@ -171,7 +128,6 @@ def run():
         conversationHistoryFilename = parseTemplatedFileName(
             APP_CONSTANTS.ONE_TO_ONE_CONVERSATION_HISTORY_FILE, userName, userId)
         writeJSONFile(conversationHistory, conversationHistoryFilename)
-
 
 if __name__ == '__main__':
     run()

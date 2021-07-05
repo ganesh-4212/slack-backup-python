@@ -1,8 +1,0 @@
-BASE_URL = 'https://slack.com/api'
-CHANNEL_LIST = BASE_URL + '/channels.list'
-CHANNEL_HISTORY = BASE_URL + '/channels.history'
-GROUP_LIST = BASE_URL + '/groups.list'
-GROUP_HISTORY = BASE_URL + '/groups.history'
-CONVERSATION_LIST = BASE_URL + '/conversations.list'
-USERS_LIST = BASE_URL + '/users.list'
-CONVERSATION_HISTORY = BASE_URL + '/conversations.history'
