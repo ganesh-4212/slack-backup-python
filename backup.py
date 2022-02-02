@@ -1,7 +1,6 @@
 import os
 import argparse
 import json
-import requests
 import app_constants as APP_CONSTANTS
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
