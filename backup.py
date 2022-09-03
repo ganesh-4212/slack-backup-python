@@ -1,6 +1,8 @@
 import os
 import argparse
+import datetime
 import json
+import requests
 import app_constants as APP_CONSTANTS
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
@@ -41,19 +43,25 @@ def readRequestJsonFile():
         jsonObj = json.load(file)
         return jsonObj
 
-
-def writeJSONFile(jsonObj, filePath):
-    outputPath = getOutputPath(filePath)
+def makedirPath(outputPath):
     dirPath = os.path.dirname(outputPath)
     if not os.path.exists(dirPath):
         os.makedirs(dirPath)
 
+def writeJSONFile(jsonObj, filePath):
+    outputPath = getOutputPath(filePath)
+    makedirPath(outputPath)
     with open(outputPath, 'w+') as file:
         json.dump(jsonObj, file, indent=True)
 
 def getUsers():
     response = client.users_list()
     return response['members']
+
+def lookupUser(users, userID):
+    for u in users:
+        if u['id'] == userID:
+            return u
 
 def getChannels():
     response = client.conversations_list(types='public_channel,private_channel')
@@ -79,6 +87,42 @@ def getConversationHistory(channelId):
         params['latest'] = msgs[-1]['ts']
     return msgs
 
+def getFileList():
+    params = { 'count': 100, 'show_files_hidden_by_limit': True, 'page': 1}
+    files = []
+    while True:
+        response = client.files_list(**params)
+        if not response['ok']:
+            break
+
+        files.extend(response['files'])
+
+        if response['paging']['pages'] <= params['page']:
+            break
+        params['page'] += 1
+
+    return files
+
+def downloadFiles(users):
+    files = getFileList()
+    writeJSONFile(files, APP_CONSTANTS.FILE_LIST_FILE)
+
+    for file in files:
+        url = file['url_private_download']
+        r = requests.get(url, headers={'Authorization': 'Bearer ' + token}, stream=True)
+        r.raise_for_status()
+
+        file['date'] = datetime.datetime.fromtimestamp(file['timestamp']).strftime('%Y-%m-%d %H:%M:%S')
+        file['author'] = lookupUser(users, file['user'])['name']
+        filename = APP_CONSTANTS.FILES_FILENAME.format(**file)
+
+        print('Downloading to ' + filename)
+
+        outputPath = getOutputPath(filename)
+        makedirPath(outputPath)
+        with open(outputPath, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=32*1024):
+                f.write(chunk)
 
 def run():
     channels = getChannels()
@@ -127,6 +171,8 @@ def run():
         conversationHistoryFilename = parseTemplatedFileName(
             APP_CONSTANTS.ONE_TO_ONE_CONVERSATION_HISTORY_FILE, userName, userId)
         writeJSONFile(conversationHistory, conversationHistoryFilename)
+
+    downloadFiles(users)
 
 if __name__ == '__main__':
     run()
