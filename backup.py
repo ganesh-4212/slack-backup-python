@@ -85,6 +85,24 @@ def getConversationHistory(channelId):
             break
 
         params['latest'] = msgs[-1]['ts']
+
+    for m in msgs:
+        if not ('reply_count' in m and m['reply_count'] > 0):
+            continue
+
+        m['replies'] = []
+        params = { 'channel': channelId, 'ts': m['ts'] }
+        while True:
+            response = client.conversations_replies(**params)
+            if not response['ok']:
+                break
+
+            m['replies'].extend(response['messages'])
+
+            if not response['has_more']:
+                break
+            params['cursor'] = response['response_metadata']['next_cursor']
+
     return msgs
 
 def getFileList():
