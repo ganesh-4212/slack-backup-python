@@ -125,7 +125,12 @@ def downloadFiles(users):
     files = getFileList()
     writeJSONFile(files, APP_CONSTANTS.FILE_LIST_FILE)
 
+    skipped_files=0
     for file in files:
+        if file['mode'] == 'hidden_by_limit':
+            skipped_files+=1
+            continue
+
         url = file['url_private_download']
         r = requests.get(url, headers={'Authorization': 'Bearer ' + token}, stream=True)
         r.raise_for_status()
@@ -141,6 +146,7 @@ def downloadFiles(users):
         with open(outputPath, 'wb') as f:
             for chunk in r.iter_content(chunk_size=32*1024):
                 f.write(chunk)
+    print(f"{skipped_files} files hidden by limit")
 
 def run():
     channels = getChannels()
