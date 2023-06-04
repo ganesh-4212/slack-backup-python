@@ -1,9 +1,11 @@
 import os
 import argparse
+import datetime
 import json
 import requests
-import web_constants as WEB_CONSTANTS
 import app_constants as APP_CONSTANTS
+from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
 
 parser = argparse.ArgumentParser(
     description='Backup Slack channel, conversation, Users, and direct messages.')
@@ -17,8 +19,10 @@ parser.add_argument('-od', '--outDir', dest='outDir',required=False,default='./o
 args = parser.parse_args()
 
 token = args.token
+auth_headers = {'Authorization': 'Bearer ' + token}
 outDir = args.outDir
 
+client = WebClient(token=token)
 
 def getOutputPath(relativePath):
     return outDir+relativePath
@@ -39,58 +43,110 @@ def readRequestJsonFile():
         jsonObj = json.load(file)
         return jsonObj
 
-
-def writeJSONFile(jsonObj, filePath):
-    outputPath = getOutputPath(filePath)
+def makedirPath(outputPath):
     dirPath = os.path.dirname(outputPath)
     if not os.path.exists(dirPath):
         os.makedirs(dirPath)
 
+def writeJSONFile(jsonObj, filePath):
+    outputPath = getOutputPath(filePath)
+    makedirPath(outputPath)
     with open(outputPath, 'w+') as file:
         json.dump(jsonObj, file, indent=True)
 
+def getUsers():
+    response = client.users_list()
+    return response['members']
+
+def lookupUser(users, userID):
+    for u in users:
+        if u['id'] == userID:
+            return u
 
 def getChannels():
-    response = requests.get(WEB_CONSTANTS.CHANNEL_LIST,
-                            params={'token': token})
-    return response.json()['channels']
-
-
-def getChannelHistory(channelId):
-    response = requests.get(WEB_CONSTANTS.CHANNEL_HISTORY, params={
-                            'token': token, 'channel': channelId})
-    return response.json()
-
+    response = client.conversations_list(types='public_channel,private_channel')
+    return response['channels']
 
 def getGroups():
-    response = requests.get(WEB_CONSTANTS.GROUP_LIST, params={'token': token})
-    return response.json()['groups']
-
-
-def getGroupHistory(groupId):
-    response = requests.get(WEB_CONSTANTS.GROUP_HISTORY, params={
-                            'token': token, 'channel': groupId})
-    return response.json()
-
+    response = client.conversations_list(types='mpim')
+    return response['channels']
 
 def getOneToOneConversations():
-    # im for one to one conv.
-    response = requests.get(WEB_CONSTANTS.CONVERSATION_LIST, params={
-                            'token': token, 'types': 'im'})
-    return response.json()['channels']
+    response = client.conversations_list(types='im')
+    return response['channels']
 
+def getConversationHistory(channelId):
+    params = { 'channel': channelId, 'count': 1000}
+    msgs = []
+    while True:
+        response = client.conversations_history(**params)
+        msgs.extend(response['messages'])
+        if not response['has_more']:
+            break
 
-def getUsers():
-    # im for one to one conv.
-    response = requests.get(WEB_CONSTANTS.USERS_LIST, params={'token': token})
-    return response.json()['members']
+        params['latest'] = msgs[-1]['ts']
 
+    for m in msgs:
+        if not ('reply_count' in m and m['reply_count'] > 0):
+            continue
 
-def getConversationHistory(conversationId):
-    response = requests.get(WEB_CONSTANTS.CONVERSATION_HISTORY, params={
-                            'token': token, 'channel': conversationId})
-    return response.json()
+        m['replies'] = []
+        params = { 'channel': channelId, 'ts': m['ts'] }
+        while True:
+            response = client.conversations_replies(**params)
+            if not response['ok']:
+                break
 
+            m['replies'].extend(response['messages'])
+
+            if not response['has_more']:
+                break
+            params['cursor'] = response['response_metadata']['next_cursor']
+
+    return msgs
+
+def getFileList():
+    params = { 'count': 100, 'show_files_hidden_by_limit': True, 'page': 1}
+    files = []
+    while True:
+        response = client.files_list(**params)
+        if not response['ok']:
+            break
+
+        files.extend(response['files'])
+
+        if response['paging']['pages'] <= params['page']:
+            break
+        params['page'] += 1
+
+    return files
+
+def downloadFiles(users):
+    files = getFileList()
+    writeJSONFile(files, APP_CONSTANTS.FILE_LIST_FILE)
+
+    skipped_files=0
+    for file in files:
+        if file['mode'] == 'hidden_by_limit':
+            skipped_files+=1
+            continue
+
+        url = file['url_private_download']
+        r = requests.get(url, headers={'Authorization': 'Bearer ' + token}, stream=True)
+        r.raise_for_status()
+
+        file['date'] = datetime.datetime.fromtimestamp(file['timestamp']).strftime('%Y-%m-%d %H:%M:%S')
+        file['author'] = lookupUser(users, file['user'])['name']
+        filename = APP_CONSTANTS.FILES_FILENAME.format(**file)
+
+        print('Downloading to ' + filename)
+
+        outputPath = getOutputPath(filename)
+        makedirPath(outputPath)
+        with open(outputPath, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=32*1024):
+                f.write(chunk)
+    print(f"{skipped_files} files hidden by limit")
 
 def run():
     channels = getChannels()
@@ -99,9 +155,12 @@ def run():
     for channel in channels:
         channelId = channel['id']
         channelName = channel['name']
-        channelHistory = getChannelHistory(channelId)
-        channelHistoryFilename = parseTemplatedFileName(
-            APP_CONSTANTS.CHANNEL_HISTORY_FILE, channelName)
+        channelHistory = getConversationHistory(channelId)
+        if channel['is_private']:
+            template = APP_CONSTANTS.PRIVATE_CHANNEL_HISTORY_FILE
+        else:
+            template = APP_CONSTANTS.CHANNEL_HISTORY_FILE
+        channelHistoryFilename = parseTemplatedFileName(template, channelName)
         writeJSONFile(channelHistory, channelHistoryFilename)
 
     groups = getGroups()
@@ -111,7 +170,7 @@ def run():
         groupId = group['id']
         groupName = group['name']
 
-        groupHistory = getGroupHistory(groupId)
+        groupHistory = getConversationHistory(groupId)
 
         groupHistoryFilename = parseTemplatedFileName(
             APP_CONSTANTS.GROUP_HISTORY_FILE, groupName)
@@ -122,7 +181,7 @@ def run():
 
     userIdToNameDict = {user['id']: user['name'] for user in users}
 
-    # Getting one to one conversation list
+    # Get one to one conversation list
     oneToOneConversations = getOneToOneConversations()
     writeJSONFile(oneToOneConversations,
                   APP_CONSTANTS.ONE_TO_ONE_CONVERSATION_LIST_FILE)
@@ -137,6 +196,7 @@ def run():
             APP_CONSTANTS.ONE_TO_ONE_CONVERSATION_HISTORY_FILE, userName, userId)
         writeJSONFile(conversationHistory, conversationHistoryFilename)
 
+    downloadFiles(users)
 
 if __name__ == '__main__':
     run()
